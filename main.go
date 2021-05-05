@@ -1,95 +1,103 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
+	"log"
+	"os"
+	"strings"
 )
 
 // Graph type
-type Graph struct {
-	vertices []*Vertex
+//type Graph struct {
+//	nodes []*Node
+//}
 
-}
+// a Graph is with key (nodeIdx) and Node
+type Graph map[int]*Node
 
-// Vertex type
-type Vertex struct {
+// Node type
+type Node struct {
+	//TODO: should change key to the value of node; add a list to record the edge weights
 	key int
-	adjacent []*Vertex
+	adjacent map[int]*Node
 }
 
-
-// Add Vertex
-func (g *Graph) AddVertex(k int) {
-	if Contains(g.vertices, k) {
-		err := fmt.Errorf("Vertex %v is already exist.", k)
+// Add Node
+func (g Graph) AddNode(k int) {
+	if ptrNode, exist := g[k]; exist {
+		err := fmt.Errorf("[Error] Node %v is already exist @%v.", k, ptrNode)
 		fmt.Println(err.Error())
 	} else {
-		g.vertices = append(g.vertices, &Vertex{key: k})
+		g[k] = &Node{key: k, adjacent: make(map[int]*Node)}
 	}
 }
 
 // Add Edge
-func (g *Graph) AddEdge(src, dst int) {
-	// get the vertex
-	srcVertex := g.GetVertex(src)
-	dstVertex := g.GetVertex(dst)
+func (g Graph) AddEdge(srcIdx, dstIdx int) {
+	// get the node
+	srcNode := g.GetNode(srcIdx)
+	dstNode := g.GetNode(dstIdx)
 
 	// check if the node exist
-	if srcVertex == nil || dstVertex == nil {
-		err := fmt.Errorf("Edge invalid: (%v -> %v).", src, dst)
+	if srcNode == nil || dstNode == nil {
+		err := fmt.Errorf("[Error] Edge invalid: (%v -> %v).", srcIdx, dstIdx)
 		fmt.Println(err.Error())
-	} else if Contains(srcVertex.adjacent, dst) {
-		err := fmt.Errorf("Edge already exists: (%v -> %v).", src, dst)
+	} else if _, exist := srcNode.adjacent[dstIdx]; exist {
+		err := fmt.Errorf("[Error] Edge already exists: (%v -> %v).", srcIdx, dstIdx)
 		fmt.Println(err.Error())
 	}
-	// add edge
-	srcVertex.adjacent = append(srcVertex.adjacent, dstVertex)
+	// add the edge
+	srcNode.adjacent[dstIdx] = dstNode
 }
 
-func (g *Graph) GetVertex(k int) *Vertex {
-	for i, v := range g.vertices {
-		if v.key == k {
-			return g.vertices[i]
-		}
+func (g Graph) GetNode(k int) *Node {
+	if ptrNode, exist := g[k]; exist {
+		return ptrNode
 	}
 	return nil
 }
 
-func Contains(s []*Vertex, k int) bool {
-	for _, v := range s{
-		if k == v.key {
-			return true
+func (g Graph) InitSNAP(fileName string) {
+	file, err := os.Open(fileName)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer file.Close()
+	scanner := bufio.NewScanner(file)
+	var nNodes, nEdges int
+	for scanner.Scan() {
+		//strNodes := strings.Fields(scanner.Text())
+		var srcNodeIdx, dstNodeIdx int
+		if scanner.Text()[0] != '#' {
+			fmt.Sscanf(scanner.Text(), "%v\t%v", &srcNodeIdx, &dstNodeIdx)
+			g.AddEdge(srcNodeIdx, dstNodeIdx)
+		} else if strings.Contains(scanner.Text(), "Nodes:") {
+			fmt.Sscanf(scanner.Text(), "# Nodes: %v Edges: %v", &nNodes, &nEdges)
+			// initialize the nodes (bypass the check in AddNode)
+			for i := 0; i< nNodes+1; i++ {
+				g.AddNode(i)
+			}
 		}
 	}
-	return false
+	if err := scanner.Err(); err != nil {
+		log.Fatal(err)
+	}
 }
 
 
 
 func main() {
-	fmt.Println("hello world!")
+	fmt.Println("[Info] Program start")
 
-	g := &Graph{}
+	g := Graph{}
 
+	// initialize the graph with SNAP datasets
+	initFileName := os.Args[1]
+	g.InitSNAP(initFileName)
 
-
-
-	for i := 1; i < 11; i++ {
-		g.AddVertex(i)
-	}
-
-	g.AddEdge(1, 9)
-	g.AddEdge(1, 5)
-	g.AddEdge(1, 2)
-	g.AddEdge(2, 2)
-	g.AddEdge(3, 4)
-	g.AddEdge(5, 6)
-	g.AddEdge(5, 8)
-	g.AddEdge(6, 7)
-	g.AddEdge(9, 10)
-
-	g.Print()
-	fmt.Println("[Done] Graph construction.")
-
+	//g.Print()
+	fmt.Println("[Info] Graph construction done.")
 
 	// empty list
 	var visitedOrder []int
@@ -99,7 +107,7 @@ func main() {
 		visitedOrder = append(visitedOrder, i)
 	}
 
-	// start from vertex 1
+	// start from node 1
 	startInx := 1
 	DFS(g, startInx, visitCb)
 	fmt.Println(visitedOrder)
@@ -108,59 +116,58 @@ func main() {
 
 	BFS(g, startInx, visitCb)
 	fmt.Println(visitedOrder)
-
-
 }
 
-func (g *Graph) Print() {
-	for _, v := range g.vertices {
-		fmt.Printf("\nVertex %v : ", v.key)
-		for _, v := range v.adjacent {
-			fmt.Printf(" %v ", v.key)
+func (g Graph) Print() {
+	for v, _ := range g {
+		fmt.Printf("\nNode %v : ", v)
+		for u, _ := range g.GetNode(v).adjacent {
+			fmt.Printf(" %v ", u)
 		}
 	}
 }
 
-
 // DFS
-func DFS (g *Graph, startIdx int, visitCb func(int)) {
+func DFS (g Graph, startIdx int, visitCb func(int)) {
 	visited := map[int]bool {}
+	visited[startIdx] = true
+	for toVisitQueue := []int{startIdx}; len(toVisitQueue) >0; {
+		currentNodeIdx := toVisitQueue[0]
+		currentNode := g.GetNode(currentNodeIdx)
+		// task
+		visitCb(currentNodeIdx)
+		// set the visited mark and deque it from toVisitQueue
+		visited[currentNodeIdx] = true
+		toVisitQueue = toVisitQueue[1:]
 
-	startVertex := g.GetVertex(startIdx)
-	if startVertex == nil {
-		err := fmt.Errorf("Vertex %v does not exist.", startIdx)
-		fmt.Println(err.Error())
-	} else {
-
-		visited[startVertex.key] = true
-		visitCb(startVertex.key)
-
-		for _, v := range startVertex.adjacent {
-			if visited[v.key] {
-				continue
+		// preappend the adjacent list of currentNode at the head of the queue (dfs)
+		for v, _ := range currentNode.adjacent {
+			if !visited[v] {
+				toVisitQueue = append([]int{v}, toVisitQueue...)
 			}
-			DFS(g, v.key, visitCb)
 		}
 	}
 }
 
 
 // BFS
-func BFS (g *Graph, startIdx int, visitCb func(int)) {
+func BFS (g Graph, startIdx int, visitCb func(int)) {
 
 	visited := map[int]bool{}
 
 	for toVisitQueue := []int{startIdx}; len(toVisitQueue) >0; {
-		// get the currentVertex from the key in queue
-		currentVertex := g.GetVertex(toVisitQueue[0])
-		visitCb(currentVertex.key)
-		// set the visited mark and deque the key from toVisitQueue
-		visited[currentVertex.key] = true
+		// get the currentNodeIdx in Queue
+		currentNodeIdx := toVisitQueue[0]
+		currentNode := g.GetNode(currentNodeIdx)
+		// task
+		visitCb(currentNodeIdx)
+		// set the visited mark and deque it from toVisitQueue
+		visited[currentNodeIdx] = true
 		toVisitQueue = toVisitQueue[1:]
-
-		for _, v := range currentVertex.adjacent {
-			if !visited[v.key] {
-				toVisitQueue = append(toVisitQueue, v.key)
+		// append the adjacent list of currentNode at the end of queue (bfs)
+		for v, _ := range currentNode.adjacent {
+			if !visited[v] {
+				toVisitQueue = append(toVisitQueue, v)
 			}
 		}
 	}
