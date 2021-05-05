@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"log"
+	"math"
 	"os"
 	"strings"
 )
@@ -75,7 +76,7 @@ func (g Graph) InitSNAP(fileName string, isWeighted bool) {
 		} else if strings.Contains(scanner.Text(), "Nodes:") {
 			fmt.Sscanf(scanner.Text(), "# Nodes: %v Edges: %v", &nNodes, &nEdges)
 			// initialize the nodes (bypass the check in AddNode)
-			for i := uint32(0); i< nNodes+1; i++ {
+			for i := uint32(0); i< nNodes; i++ {
 				g.AddNode(i)
 			}
 		}
@@ -100,26 +101,26 @@ func main() {
 	//g.Print()
 	fmt.Println("[Info] Graph construction done.")
 
-	// empty list
-	var visitedOrder []uint32
+	//// empty list
+	//var visitedOrder []uint32
+	//
+	//// define the Callback function in traversal, here append the search order
+	//visitCb := func(i uint32) {
+	//	visitedOrder = append(visitedOrder, i)
+	//}
+	//
+	//// start from node 1
+	//startInx := uint32(1)
+	//DFS(g, startInx, visitCb)
+	//fmt.Println(visitedOrder)
+	//
+	//visitedOrder = []uint32{}
+	//
+	//BFS(g, startInx, visitCb)
+	//fmt.Println(visitedOrder)
 
-	// define the Callback function in traversal, here append the search order
-	visitCb := func(i uint32) {
-		visitedOrder = append(visitedOrder, i)
-	}
-
-	// start from node 1
-	startInx := uint32(1)
-	DFS(g, startInx, visitCb)
-	fmt.Println(visitedOrder)
-
-	visitedOrder = []uint32{}
-
-	BFS(g, startInx, visitCb)
-	fmt.Println(visitedOrder)
-
-	
-
+	PageRank(g, 0.85, 0.1)
+	fmt.Println("PageRank accomplished.")
 
 
 
@@ -180,6 +181,45 @@ func BFS (g Graph, startIdx uint32, visitCb func(uint32)) {
 	}
 }
 
+
+// PageRank
+func PageRank(g Graph, damping float64, eps float64) {
+	sumEdgeWeight := 0.0
+	// initialization (PR(node) = 1 / sum(edgeWeight))
+	for _, v := range g {
+		for _, e := range v.weight {
+			sumEdgeWeight += e
+		}
+	}
+
+	//TODO: make the PR trans in weighted version
+	initPR := 1 / float64(len(g))
+	for _, v := range g {
+		v.nodeValue = initPR
+	}
+	
+	for errAvgSum := 1.0; errAvgSum >= eps; {
+		errSum := 0.0
+		newNodeValue := make(map[uint32]float64)
+		fixedDump := (1.0 - damping) / float64(len(g))
+		for i := uint32(0); i < uint32(len(g)); i++ {
+			newNodeValue[i] = fixedDump
+			for _, v := range g {
+				if len(v.adjacent) != 0 {
+					sendValue := v.nodeValue / float64(len(v.adjacent))
+					if _, exist := v.adjacent[i]; exist {
+						newNodeValue[i] += sendValue * damping
+					}
+				}
+			}
+			errSum += math.Abs(newNodeValue[i] - g[i].nodeValue)
+			g[i].nodeValue = newNodeValue[i]
+		}
+		// calculate the average error
+		errAvgSum = errSum / float64(len(g))
+		fmt.Println(errAvgSum)
+	}
+}
 
 
 
