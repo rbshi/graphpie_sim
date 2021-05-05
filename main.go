@@ -8,37 +8,31 @@ import (
 	"strings"
 )
 
-// Graph type
-//type Graph struct {
-//	nodes []*Node
-//}
-
 // a Graph is with key (nodeIdx) and Node
-type Graph map[int]*Node
+type Graph map[uint32]*Node
 
 // Node type
 type Node struct {
-	//TODO: should change key to the value of node; add a list to record the edge weights
-	key int
-	adjacent map[int]*Node
+	nodeValue float64
+	adjacent map[uint32]*Node
+	weight map[uint32]float64
 }
 
 // Add Node
-func (g Graph) AddNode(k int) {
+func (g Graph) AddNode(k uint32) {
 	if ptrNode, exist := g[k]; exist {
 		err := fmt.Errorf("[Error] Node %v is already exist @%v.", k, ptrNode)
 		fmt.Println(err.Error())
 	} else {
-		g[k] = &Node{key: k, adjacent: make(map[int]*Node)}
+		g[k] = &Node{nodeValue: 0, adjacent: make(map[uint32]*Node), weight: make(map[uint32]float64)}
 	}
 }
 
 // Add Edge
-func (g Graph) AddEdge(srcIdx, dstIdx int) {
+func (g Graph) AddEdge(srcIdx, dstIdx uint32, weight float64) {
 	// get the node
 	srcNode := g.GetNode(srcIdx)
 	dstNode := g.GetNode(dstIdx)
-
 	// check if the node exist
 	if srcNode == nil || dstNode == nil {
 		err := fmt.Errorf("[Error] Edge invalid: (%v -> %v).", srcIdx, dstIdx)
@@ -49,33 +43,39 @@ func (g Graph) AddEdge(srcIdx, dstIdx int) {
 	}
 	// add the edge
 	srcNode.adjacent[dstIdx] = dstNode
+	srcNode.weight[dstIdx] = weight
 }
 
-func (g Graph) GetNode(k int) *Node {
+func (g Graph) GetNode(k uint32) *Node {
 	if ptrNode, exist := g[k]; exist {
 		return ptrNode
 	}
 	return nil
 }
 
-func (g Graph) InitSNAP(fileName string) {
+func (g Graph) InitSNAP(fileName string, isWeighted bool) {
 	file, err := os.Open(fileName)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer file.Close()
 	scanner := bufio.NewScanner(file)
-	var nNodes, nEdges int
+	var nNodes, nEdges uint32
 	for scanner.Scan() {
 		//strNodes := strings.Fields(scanner.Text())
-		var srcNodeIdx, dstNodeIdx int
+		var srcNodeIdx, dstNodeIdx uint32
+		edgeWeight := 0.0
 		if scanner.Text()[0] != '#' {
-			fmt.Sscanf(scanner.Text(), "%v\t%v", &srcNodeIdx, &dstNodeIdx)
-			g.AddEdge(srcNodeIdx, dstNodeIdx)
+			if isWeighted{
+				fmt.Sscanf(scanner.Text(), "%v\t%v\t%v", &srcNodeIdx, &dstNodeIdx, &edgeWeight)
+			} else {
+				fmt.Sscanf(scanner.Text(), "%v\t%v", &srcNodeIdx, &dstNodeIdx)
+			}
+			g.AddEdge(srcNodeIdx, dstNodeIdx, edgeWeight)
 		} else if strings.Contains(scanner.Text(), "Nodes:") {
 			fmt.Sscanf(scanner.Text(), "# Nodes: %v Edges: %v", &nNodes, &nEdges)
 			// initialize the nodes (bypass the check in AddNode)
-			for i := 0; i< nNodes+1; i++ {
+			for i := uint32(0); i< nNodes+1; i++ {
 				g.AddNode(i)
 			}
 		}
@@ -88,50 +88,57 @@ func (g Graph) InitSNAP(fileName string) {
 
 
 func main() {
-	fmt.Println("[Info] Program start")
+	fmt.Println("[Info] Program start.")
 
 	g := Graph{}
 
 	// initialize the graph with SNAP datasets
 	initFileName := os.Args[1]
-	g.InitSNAP(initFileName)
+	isWeighted := os.Args[2] == "true"
+	g.InitSNAP(initFileName, isWeighted)
 
 	//g.Print()
 	fmt.Println("[Info] Graph construction done.")
 
 	// empty list
-	var visitedOrder []int
+	var visitedOrder []uint32
 
 	// define the Callback function in traversal, here append the search order
-	visitCb := func(i int) {
+	visitCb := func(i uint32) {
 		visitedOrder = append(visitedOrder, i)
 	}
 
 	// start from node 1
-	startInx := 1
+	startInx := uint32(1)
 	DFS(g, startInx, visitCb)
 	fmt.Println(visitedOrder)
 
-	visitedOrder = []int{}
+	visitedOrder = []uint32{}
 
 	BFS(g, startInx, visitCb)
 	fmt.Println(visitedOrder)
+
+	
+
+
+
+
 }
 
 func (g Graph) Print() {
-	for v, _ := range g {
+	for v := range g {
 		fmt.Printf("\nNode %v : ", v)
-		for u, _ := range g.GetNode(v).adjacent {
+		for u := range g.GetNode(v).adjacent {
 			fmt.Printf(" %v ", u)
 		}
 	}
 }
 
 // DFS
-func DFS (g Graph, startIdx int, visitCb func(int)) {
-	visited := map[int]bool {}
+func DFS (g Graph, startIdx uint32, visitCb func(uint32)) {
+	visited := map[uint32]bool {}
 	visited[startIdx] = true
-	for toVisitQueue := []int{startIdx}; len(toVisitQueue) >0; {
+	for toVisitQueue := []uint32{startIdx}; len(toVisitQueue) >0; {
 		currentNodeIdx := toVisitQueue[0]
 		currentNode := g.GetNode(currentNodeIdx)
 		// task
@@ -140,10 +147,10 @@ func DFS (g Graph, startIdx int, visitCb func(int)) {
 		visited[currentNodeIdx] = true
 		toVisitQueue = toVisitQueue[1:]
 
-		// preappend the adjacent list of currentNode at the head of the queue (dfs)
-		for v, _ := range currentNode.adjacent {
+		// pre-append the adjacent list of currentNode at the head of the queue (dfs)
+		for v := range currentNode.adjacent {
 			if !visited[v] {
-				toVisitQueue = append([]int{v}, toVisitQueue...)
+				toVisitQueue = append([]uint32{v}, toVisitQueue...)
 			}
 		}
 	}
@@ -151,11 +158,11 @@ func DFS (g Graph, startIdx int, visitCb func(int)) {
 
 
 // BFS
-func BFS (g Graph, startIdx int, visitCb func(int)) {
+func BFS (g Graph, startIdx uint32, visitCb func(uint32)) {
 
-	visited := map[int]bool{}
+	visited := map[uint32]bool{}
 
-	for toVisitQueue := []int{startIdx}; len(toVisitQueue) >0; {
+	for toVisitQueue := []uint32{startIdx}; len(toVisitQueue) >0; {
 		// get the currentNodeIdx in Queue
 		currentNodeIdx := toVisitQueue[0]
 		currentNode := g.GetNode(currentNodeIdx)
@@ -165,7 +172,7 @@ func BFS (g Graph, startIdx int, visitCb func(int)) {
 		visited[currentNodeIdx] = true
 		toVisitQueue = toVisitQueue[1:]
 		// append the adjacent list of currentNode at the end of queue (bfs)
-		for v, _ := range currentNode.adjacent {
+		for v := range currentNode.adjacent {
 			if !visited[v] {
 				toVisitQueue = append(toVisitQueue, v)
 			}
