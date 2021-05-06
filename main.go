@@ -54,7 +54,7 @@ func (g Graph) GetNode(k uint32) *Node {
 	return nil
 }
 
-func (g Graph) InitSNAP(fileName string, isWeighted bool) {
+func (g Graph) InitSNAP(fileName string, isWeighted bool, fromZeroIdx bool) {
 	file, err := os.Open(fileName)
 	if err != nil {
 		log.Fatal(err)
@@ -65,7 +65,7 @@ func (g Graph) InitSNAP(fileName string, isWeighted bool) {
 	for scanner.Scan() {
 		//strNodes := strings.Fields(scanner.Text())
 		var srcNodeIdx, dstNodeIdx uint32
-		edgeWeight := 0.0
+		edgeWeight := 1.0
 		if scanner.Text()[0] != '#' {
 			if isWeighted{
 				fmt.Sscanf(scanner.Text(), "%v\t%v\t%v", &srcNodeIdx, &dstNodeIdx, &edgeWeight)
@@ -76,8 +76,15 @@ func (g Graph) InitSNAP(fileName string, isWeighted bool) {
 		} else if strings.Contains(scanner.Text(), "Nodes:") {
 			fmt.Sscanf(scanner.Text(), "# Nodes: %v Edges: %v", &nNodes, &nEdges)
 			// initialize the nodes (bypass the check in AddNode)
-			for i := uint32(0); i< nNodes; i++ {
-				g.AddNode(i)
+			//TODO: the algorithm codes are with NodeIdx from 1 (with Florida format)
+			if fromZeroIdx {
+				for i := uint32(0); i< nNodes; i++ {
+					g.AddNode(i)
+				}
+			} else {
+				for i := uint32(1); i< nNodes+1; i++ {
+					g.AddNode(i)
+				}
 			}
 		}
 	}
@@ -86,6 +93,45 @@ func (g Graph) InitSNAP(fileName string, isWeighted bool) {
 	}
 }
 
+// For Florida sparse matrix collection with Matrix Market format
+func (g Graph) InitMatMarket(fileName string, isWeighted bool) {
+	file, err := os.Open(fileName)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer file.Close()
+	scanner := bufio.NewScanner(file)
+	var nNodes, nEdges uint32
+	for scanner.Scan() {
+		// bypass the comments
+		if scanner.Text()[0] == '%' {
+			continue
+		} else {
+			fmt.Sscanf(scanner.Text(), "%v %v %v", &nNodes, &nNodes, &nEdges)
+			// add nodes
+			for i := uint32(1); i<= nNodes; i++ {
+				g.AddNode(i)
+			}
+			break
+		}
+	}
+
+	var srcNodeIdx, dstNodeIdx uint32
+	edgeWeight := 1.0
+	for scanner.Scan() {
+		//strNodes := strings.Fields(scanner.Text())
+		if isWeighted {
+			fmt.Sscanf(scanner.Text(), "%v\t%v\t%v", &srcNodeIdx, &dstNodeIdx, &edgeWeight)
+		} else {
+			fmt.Sscanf(scanner.Text(), "%v\t%v", &srcNodeIdx, &dstNodeIdx)
+		}
+		g.AddEdge(srcNodeIdx, dstNodeIdx, edgeWeight)
+	}
+
+	if err := scanner.Err(); err != nil {
+		log.Fatal(err)
+	}
+}
 
 
 func main() {
@@ -96,8 +142,9 @@ func main() {
 	// initialize the graph with SNAP datasets
 	initFileName := os.Args[1]
 	isWeighted := os.Args[2] == "true"
-	g.InitSNAP(initFileName, isWeighted)
-
+	//fromZeroIdx := os.Args[3] == "true"
+	//g.InitSNAP(initFileName, isWeighted, fromZeroIdx)
+	g.InitMatMarket(initFileName, isWeighted)
 	//g.Print()
 	fmt.Println("[Info] Graph construction done.")
 
@@ -119,7 +166,7 @@ func main() {
 	//BFS(g, startInx, visitCb)
 	//fmt.Println(visitedOrder)
 
-	PageRank(g, 0.85, 0.1)
+	PageRank(g, 0.85, 0.000001)
 	fmt.Println("PageRank accomplished.")
 
 
@@ -202,7 +249,7 @@ func PageRank(g Graph, damping float64, eps float64) {
 		errSum := 0.0
 		newNodeValue := make(map[uint32]float64)
 		fixedDump := (1.0 - damping) / float64(len(g))
-		for i := uint32(0); i < uint32(len(g)); i++ {
+		for i := uint32(1); i <= uint32(len(g)); i++ {
 			newNodeValue[i] = fixedDump
 			for _, v := range g {
 				if len(v.adjacent) != 0 {
@@ -217,7 +264,7 @@ func PageRank(g Graph, damping float64, eps float64) {
 		}
 		// calculate the average error
 		errAvgSum = errSum / float64(len(g))
-		fmt.Println(errAvgSum)
+		fmt.Println("[Info] PageRank epsilon is converged to: ", errAvgSum)
 	}
 }
 
