@@ -15,8 +15,8 @@ type Graph map[uint32]*Node
 // Node type
 type Node struct {
 	nodeValue float64
-	adjacent map[uint32]*Node
-	weight map[uint32]float64
+	adjacent  map[uint32]*Node
+	weight    map[uint32]float64
 }
 
 // Add Node
@@ -67,7 +67,7 @@ func (g Graph) InitSNAP(fileName string, isWeighted bool, fromZeroIdx bool) {
 		var srcNodeIdx, dstNodeIdx uint32
 		edgeWeight := 1.0
 		if scanner.Text()[0] != '#' {
-			if isWeighted{
+			if isWeighted {
 				fmt.Sscanf(scanner.Text(), "%v\t%v\t%v", &srcNodeIdx, &dstNodeIdx, &edgeWeight)
 			} else {
 				fmt.Sscanf(scanner.Text(), "%v\t%v", &srcNodeIdx, &dstNodeIdx)
@@ -78,11 +78,11 @@ func (g Graph) InitSNAP(fileName string, isWeighted bool, fromZeroIdx bool) {
 			// initialize the nodes (bypass the check in AddNode)
 			//TODO: the algorithm codes are with NodeIdx from 1 (with Florida format)
 			if fromZeroIdx {
-				for i := uint32(0); i< nNodes; i++ {
+				for i := uint32(0); i < nNodes; i++ {
 					g.AddNode(i)
 				}
 			} else {
-				for i := uint32(1); i< nNodes+1; i++ {
+				for i := uint32(1); i < nNodes+1; i++ {
 					g.AddNode(i)
 				}
 			}
@@ -109,7 +109,7 @@ func (g Graph) InitMatMarket(fileName string, isWeighted bool) {
 		} else {
 			fmt.Sscanf(scanner.Text(), "%v %v %v", &nNodes, &nNodes, &nEdges)
 			// add nodes
-			for i := uint32(1); i<= nNodes; i++ {
+			for i := uint32(1); i <= nNodes; i++ {
 				g.AddNode(i)
 			}
 			break
@@ -132,7 +132,6 @@ func (g Graph) InitMatMarket(fileName string, isWeighted bool) {
 		log.Fatal(err)
 	}
 }
-
 
 func main() {
 	fmt.Println("[Info] Program start.")
@@ -169,8 +168,6 @@ func main() {
 	PageRank(g, 0.85, 0.000001)
 	fmt.Println("PageRank accomplished.")
 
-
-
 }
 
 func (g Graph) Print() {
@@ -183,10 +180,10 @@ func (g Graph) Print() {
 }
 
 // DFS
-func DFS (g Graph, startIdx uint32, visitCb func(uint32)) {
-	visited := map[uint32]bool {}
+func DFS(g Graph, startIdx uint32, visitCb func(uint32)) {
+	visited := map[uint32]bool{}
 	visited[startIdx] = true
-	for toVisitQueue := []uint32{startIdx}; len(toVisitQueue) >0; {
+	for toVisitQueue := []uint32{startIdx}; len(toVisitQueue) > 0; {
 		currentNodeIdx := toVisitQueue[0]
 		currentNode := g.GetNode(currentNodeIdx)
 		// task
@@ -204,13 +201,12 @@ func DFS (g Graph, startIdx uint32, visitCb func(uint32)) {
 	}
 }
 
-
 // BFS
-func BFS (g Graph, startIdx uint32, visitCb func(uint32)) {
+func BFS(g Graph, startIdx uint32, visitCb func(uint32)) {
 
 	visited := map[uint32]bool{}
 
-	for toVisitQueue := []uint32{startIdx}; len(toVisitQueue) >0; {
+	for toVisitQueue := []uint32{startIdx}; len(toVisitQueue) > 0; {
 		// get the currentNodeIdx in Queue
 		currentNodeIdx := toVisitQueue[0]
 		currentNode := g.GetNode(currentNodeIdx)
@@ -228,7 +224,6 @@ func BFS (g Graph, startIdx uint32, visitCb func(uint32)) {
 	}
 }
 
-
 // PageRank
 func PageRank(g Graph, damping float64, eps float64) {
 	sumEdgeWeight := 0.0
@@ -244,7 +239,7 @@ func PageRank(g Graph, damping float64, eps float64) {
 	for _, v := range g {
 		v.nodeValue = initPR
 	}
-	
+
 	for errAvgSum := 1.0; errAvgSum >= eps; {
 		errSum := 0.0
 		newNodeValue := make(map[uint32]float64)
@@ -267,18 +262,3 @@ func PageRank(g Graph, damping float64, eps float64) {
 		fmt.Println("[Info] PageRank epsilon is converged to: ", errAvgSum)
 	}
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
