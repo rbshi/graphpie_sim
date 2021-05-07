@@ -165,9 +165,19 @@ func main() {
 	//BFS(g, startInx, visitCb)
 	//fmt.Println(visitedOrder)
 
-	PageRank(g, 0.85, 0.000001)
-	fmt.Println("PageRank accomplished.")
-
+	//PageRank(g, 0.85, 0.00000000001)
+	//fmt.Println("[Info] PageRank accomplished.")
+	maxDist := 0.0
+	for v := uint32(1); v < 2; v++ {
+		dist, _ := SSSP(g, v)
+		for _, val := range dist {
+			if val > maxDist {
+				maxDist = val
+			}
+		}
+	}
+	fmt.Println("[Info] SSSP accomplished.")
+	fmt.Println("[Info] MaxDist is:", maxDist)
 }
 
 func (g Graph) Print() {
@@ -224,6 +234,35 @@ func BFS(g Graph, startIdx uint32, visitCb func(uint32)) {
 	}
 }
 
+// SSSP
+func SSSP(g Graph, startIdx uint32) (map[uint32]float64, map[uint32]bool) {
+	visited := map[uint32]bool{}
+	dist := map[uint32]float64{}
+
+	visited[startIdx] = true
+	dist[startIdx] = 0.0
+
+	for toVisitQueue := []uint32{startIdx}; len(toVisitQueue) > 0; {
+		currentNodeIdx := toVisitQueue[0]
+		currentNode := g.GetNode(currentNodeIdx)
+
+		// set the visited mark and deque it from toVisitQueue
+		visited[currentNodeIdx] = true
+		toVisitQueue = toVisitQueue[1:]
+
+		for v := range currentNode.adjacent {
+			ndist := dist[currentNodeIdx] + currentNode.weight[v]
+			if !visited[v] {
+				toVisitQueue = append(toVisitQueue, v) // bfs
+				dist[v] = ndist
+			} else if dist[v] > ndist {
+				dist[v] = ndist
+			}
+		}
+	}
+	return dist, visited
+}
+
 // PageRank
 func PageRank(g Graph, damping float64, eps float64) {
 	sumEdgeWeight := 0.0
@@ -240,23 +279,31 @@ func PageRank(g Graph, damping float64, eps float64) {
 		v.nodeValue = initPR
 	}
 
+	fixedDump := (1.0 - damping) / float64(len(g))
 	for errAvgSum := 1.0; errAvgSum >= eps; {
 		errSum := 0.0
-		newNodeValue := make(map[uint32]float64)
-		fixedDump := (1.0 - damping) / float64(len(g))
-		for i := uint32(1); i <= uint32(len(g)); i++ {
-			newNodeValue[i] = fixedDump
-			for _, v := range g {
-				if len(v.adjacent) != 0 {
-					sendValue := v.nodeValue / float64(len(v.adjacent))
-					if _, exist := v.adjacent[i]; exist {
-						newNodeValue[i] += sendValue * damping
-					}
-				}
+
+		// calculate the outgoing value of each node
+		sendNodeValue := make(map[uint32]float64)
+		for i, v := range g {
+			if len(v.adjacent) > 0 {
+				sendNodeValue[i] = v.nodeValue / float64(len(v.adjacent)) * damping
+			} else {
+				sendNodeValue[i] = 0.0
 			}
-			errSum += math.Abs(newNodeValue[i] - g[i].nodeValue)
-			g[i].nodeValue = newNodeValue[i]
+
 		}
+
+		for _, v := range g {
+			update := 0.0
+			for j, _ := range v.adjacent {
+				update += sendNodeValue[j]
+			}
+			newNodeValue := fixedDump + update
+			errSum += math.Abs(newNodeValue - v.nodeValue)
+			v.nodeValue = newNodeValue
+		}
+
 		// calculate the average error
 		errAvgSum = errSum / float64(len(g))
 		fmt.Println("[Info] PageRank epsilon is converged to: ", errAvgSum)
