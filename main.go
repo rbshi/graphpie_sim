@@ -42,12 +42,12 @@ func SegmentedPartitioner(g graph, nFrag int) (sg subGraph) {
 }
 
 // Add node
-func (g graph) AddNode(k uint32) {
+func (g graph) AddNode(k uint32, v float64) {
 	if ptrNode, exist := g[k]; exist {
 		err := fmt.Errorf("[Error] Node %v is already exist @%v.", k, ptrNode)
 		fmt.Println(err.Error())
 	} else {
-		g[k] = &node{nodeValue: 0, adjacent: make(map[uint32]*node), weight: make(map[uint32]float64)}
+		g[k] = &node{nodeValue: v, adjacent: make(map[uint32]*node), weight: make(map[uint32]float64)}
 	}
 }
 
@@ -101,11 +101,11 @@ func (g graph) InitSNAP(fileName string, isWeighted bool, fromZeroIdx bool) {
 			//TODO: the algorithm codes are with NodeIdx from 1 (with Florida format)
 			if fromZeroIdx {
 				for i := uint32(0); i < nNodes; i++ {
-					g.AddNode(i)
+					g.AddNode(i, 0)
 				}
 			} else {
 				for i := uint32(1); i < nNodes+1; i++ {
-					g.AddNode(i)
+					g.AddNode(i, 0)
 				}
 			}
 		}
@@ -132,7 +132,7 @@ func (g graph) InitMatMarket(fileName string, isWeighted bool) {
 			fmt.Sscanf(scanner.Text(), "%v %v %v", &nNodes, &nNodes, &nEdges)
 			// add nodes
 			for i := uint32(1); i <= nNodes; i++ {
-				g.AddNode(i)
+				g.AddNode(i, 0)
 			}
 			break
 		}
@@ -155,6 +155,78 @@ func (g graph) InitMatMarket(fileName string, isWeighted bool) {
 	}
 }
 
+func LoadResult(fileName string) (res valueMap) {
+	res = valueMap{}
+	file, err := os.Open(fileName)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer file.Close()
+	scanner := bufio.NewScanner(file)
+
+	nodeValue := 1.0
+	nodeIdx := uint32(1)
+
+	for scanner.Scan() {
+		// if the node result value is `infinity`, bypass adding it into result map
+		if strings.Contains(scanner.Text(), "infinity") {
+			continue
+		}
+		fmt.Sscanf(scanner.Text(), "%v %v", &nodeIdx, &nodeValue)
+		res[nodeIdx] = nodeValue
+	}
+
+	if err := scanner.Err(); err != nil {
+		log.Fatal(err)
+	}
+
+	return res
+}
+
+// For Florida sparse matrix collection with Matrix Market format
+func (g graph) InitNodeEdgeFile(fileName string, isWeighted bool) {
+	fileNode, err := os.Open(fileName + ".v")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer fileNode.Close()
+
+	nodeValue := 1.0
+	nodeIdx := uint32(1)
+	scanner := bufio.NewScanner(fileNode)
+	for scanner.Scan() {
+		fmt.Sscanf(scanner.Text(), "%v %v", &nodeIdx, &nodeValue)
+		g.AddNode(nodeIdx, nodeValue)
+	}
+
+	if err := scanner.Err(); err != nil {
+		log.Fatal(err)
+	}
+
+	fileEdge, err := os.Open(fileName + ".e")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer fileEdge.Close()
+
+	var srcNodeIdx, dstNodeIdx uint32
+	edgeWeight := 1.0
+	scanner = bufio.NewScanner(fileEdge)
+	for scanner.Scan() {
+		//strNodes := strings.Fields(scanner.Text())
+		if isWeighted {
+			fmt.Sscanf(scanner.Text(), "%v %v %v", &srcNodeIdx, &dstNodeIdx, &edgeWeight)
+		} else {
+			fmt.Sscanf(scanner.Text(), "%v\t%v", &srcNodeIdx, &dstNodeIdx)
+		}
+		g.AddEdge(srcNodeIdx, dstNodeIdx, edgeWeight)
+	}
+
+	if err := scanner.Err(); err != nil {
+		log.Fatal(err)
+	}
+}
+
 func main() {
 	fmt.Println("[Info] Program start.")
 
@@ -165,9 +237,14 @@ func main() {
 	isWeighted := os.Args[2] == "true"
 	//fromZeroIdx := os.Args[3] == "true"
 	//g.InitSNAP(initFileName, isWeighted, fromZeroIdx)
-	g.InitMatMarket(initFileName, isWeighted)
+	//g.InitMatMarket(initFileName, isWeighted)
+	g.InitNodeEdgeFile(initFileName, isWeighted)
 	//g.Print()
 	fmt.Println("[Info] Graph construction done.")
+
+	resFileName := os.Args[3]
+	res := LoadResult(resFileName)
+	fmt.Println("[Info] Read in the results.")
 
 	nFrag := 2048
 	sg := SegmentedPartitioner(g, nFrag)
@@ -181,9 +258,15 @@ func main() {
 	//	visitedOrder = append(visitedOrder, i)
 	//}
 
-	startNodeIdx := uint32(62888)
+	startNodeIdx := uint32(6)
 	// standard
 	dist, _ := Sssp(g, startNodeIdx)
+
+	for v, vv := range res {
+		if dist[v] != vv {
+			fmt.Println("Different @", v, res[v], vv)
+		}
+	}
 
 	// this is the global map for updating message
 	// FIXME: []float64 is the the message (ndist) in SSSP
