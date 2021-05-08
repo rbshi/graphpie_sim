@@ -169,9 +169,9 @@ func main() {
 	//g.Print()
 	fmt.Println("[Info] Graph construction done.")
 
-	nFrag := 2
+	nFrag := 2048
 	sg := SegmentedPartitioner(g, nFrag)
-	fmt.Println("Size of g:", len(sg))
+	fmt.Println("[Info] Number of workers:", len(sg))
 
 	//// empty list
 	//var visitedOrder []uint32
@@ -181,7 +181,7 @@ func main() {
 	//	visitedOrder = append(visitedOrder, i)
 	//}
 
-	startNodeIdx := uint32(6)
+	startNodeIdx := uint32(62888)
 	// standard
 	dist, _ := Sssp(g, startNodeIdx)
 
@@ -330,9 +330,9 @@ func SsspPEval(g graph, startIdx uint32, lRangeVIdx uint32, rRangeVIdx uint32, u
 			currentNode := g.GetNode(currentNodeIdx)
 			toVisitQueue = toVisitQueue[1:]
 
-			if visited[currentNodeIdx] {
-				continue
-			}
+			//if visited[currentNodeIdx] {
+			//	continue
+			//}
 
 			visited[currentNodeIdx] = true
 
@@ -381,9 +381,9 @@ func SsspIncEval(g graph, startIdx uint32, lRangeVIdx uint32, rRangeVIdx uint32,
 		currentNode := g.GetNode(currentNodeIdx)
 		toVisitQueue = toVisitQueue[1:]
 
-		if visited[currentNodeIdx] {
-			continue
-		}
+		//if visited[currentNodeIdx] {
+		//	continue
+		//}
 
 		visited[currentNodeIdx] = true
 
@@ -420,9 +420,9 @@ func Sssp(g graph, startIdx uint32) (valueMap, visitedMap) {
 		currentNode := g.GetNode(currentNodeIdx)
 		toVisitQueue = toVisitQueue[1:]
 
-		if visited[currentNodeIdx] {
-			continue
-		}
+		//if visited[currentNodeIdx] {
+		//	continue
+		//}
 
 		visited[currentNodeIdx] = true
 
