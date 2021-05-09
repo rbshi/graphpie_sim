@@ -9,29 +9,29 @@ import (
 	"strings"
 )
 
-// a graph is with key (nodeIdx) and node
-type graph map[uint32]*node
+// a Graph is with key (nodeIdx) and node
+type Graph map[uint32]*Node
 
-// subGraph is the partitioned from graph
-type subGraph []graph
+// SubGraph is the partitioned from Graph
+type SubGraph []Graph
 
-// node type
-type node struct {
+// Node type
+type Node struct {
 	nodeValue float64
-	adjacent  map[uint32]*node
+	adjacent  map[uint32]*Node
 	weight    map[uint32]float64
 }
 
 // visited map
-type visitedMap map[uint32]bool
-type valueMap map[uint32]float64
+type BoolMap map[uint32]bool
+type ValueMap map[uint32]float64
 
 // Graph partition: SegmentedPartitioner
-func SegmentedPartitioner(g graph, nFrag int) (sg subGraph) {
+func SegmentedPartitioner(g Graph, nFrag int) (sg SubGraph) {
 	// initialization
-	sg = make(subGraph, nFrag)
+	sg = make(SubGraph, nFrag)
 	for iFrag := 0; iFrag < nFrag; iFrag++ {
-		sg[iFrag] = make(map[uint32]*node)
+		sg[iFrag] = make(map[uint32]*Node)
 	}
 	vnumFrag := uint32(math.Ceil(float64(len(g)) / float64(nFrag)))
 	for srcNodeIdx, srcNode := range g {
@@ -41,19 +41,19 @@ func SegmentedPartitioner(g graph, nFrag int) (sg subGraph) {
 	return sg
 }
 
-// Add node
-func (g graph) AddNode(k uint32, v float64) {
+// Add Node
+func (g Graph) AddNode(k uint32, v float64) {
 	if ptrNode, exist := g[k]; exist {
 		err := fmt.Errorf("[Error] Node %v is already exist @%v.", k, ptrNode)
 		fmt.Println(err.Error())
 	} else {
-		g[k] = &node{nodeValue: v, adjacent: make(map[uint32]*node), weight: make(map[uint32]float64)}
+		g[k] = &Node{nodeValue: v, adjacent: make(map[uint32]*Node), weight: make(map[uint32]float64)}
 	}
 }
 
 // Add Edge
-func (g graph) AddEdge(srcIdx, dstIdx uint32, weight float64) {
-	// get the node
+func (g Graph) AddEdge(srcIdx, dstIdx uint32, weight float64) {
+	// get the Node
 	srcNode := g.GetNode(srcIdx)
 	dstNode := g.GetNode(dstIdx)
 	// check if the node exist
@@ -69,14 +69,14 @@ func (g graph) AddEdge(srcIdx, dstIdx uint32, weight float64) {
 	srcNode.weight[dstIdx] = weight
 }
 
-func (g graph) GetNode(k uint32) *node {
+func (g Graph) GetNode(k uint32) *Node {
 	if ptrNode, exist := g[k]; exist {
 		return ptrNode
 	}
 	return nil
 }
 
-func (g graph) InitSNAP(fileName string, isWeighted bool, fromZeroIdx bool) {
+func (g Graph) InitSNAP(fileName string, isWeighted bool, fromZeroIdx bool) {
 	file, err := os.Open(fileName)
 	if err != nil {
 		log.Fatal(err)
@@ -116,7 +116,7 @@ func (g graph) InitSNAP(fileName string, isWeighted bool, fromZeroIdx bool) {
 }
 
 // For Florida sparse matrix collection with Matrix Market format
-func (g graph) InitMatMarket(fileName string, isWeighted bool) {
+func (g Graph) InitMatMarket(fileName string, isWeighted bool) {
 	file, err := os.Open(fileName)
 	if err != nil {
 		log.Fatal(err)
@@ -155,8 +155,8 @@ func (g graph) InitMatMarket(fileName string, isWeighted bool) {
 	}
 }
 
-func LoadResult(fileName string) (res valueMap) {
-	res = valueMap{}
+func LoadResult(fileName string) (res ValueMap) {
+	res = ValueMap{}
 	file, err := os.Open(fileName)
 	if err != nil {
 		log.Fatal(err)
@@ -184,7 +184,7 @@ func LoadResult(fileName string) (res valueMap) {
 }
 
 // For Florida sparse matrix collection with Matrix Market format
-func (g graph) InitNodeEdgeFile(fileName string, isWeighted bool) {
+func (g Graph) InitNodeEdgeFile(fileName string, isWeighted bool) {
 	fileNode, err := os.Open(fileName + ".v")
 	if err != nil {
 		log.Fatal(err)
@@ -230,9 +230,9 @@ func (g graph) InitNodeEdgeFile(fileName string, isWeighted bool) {
 func main() {
 	fmt.Println("[Info] Program start.")
 
-	g := graph{}
+	g := Graph{}
 
-	// initialize the graph with SNAP datasets
+	// initialize the Graph with SNAP datasets
 	initFileName := os.Args[1]
 	isWeighted := os.Args[2] == "true"
 	//fromZeroIdx := os.Args[3] == "true"
@@ -246,7 +246,7 @@ func main() {
 	res := LoadResult(resFileName)
 	fmt.Println("[Info] Read in the results.")
 
-	nFrag := 2048
+	nFrag := 10
 	sg := SegmentedPartitioner(g, nFrag)
 	fmt.Println("[Info] Number of workers:", len(sg))
 
@@ -280,9 +280,9 @@ func main() {
 
 	for i := uint32(0); i < uint32(nFrag); i++ {
 		// FIXME: initialize
-		distPtrList[i] = valueMap{}
-		visitedPtrList[i] = visitedMap{}
-		updateMessage[i] = valueMap{}
+		distPtrList[i] = ValueMap{}
+		visitedPtrList[i] = BoolMap{}
+		updateMessage[i] = ValueMap{}
 		SsspPEval(sg[i], startNodeIdx, i*vnumFrag+1, (i+1)*vnumFrag, updateMessage[i], distPtrList[i], visitedPtrList[i])
 	}
 
@@ -292,7 +292,7 @@ func main() {
 		flagNextRound = false
 
 		//FIXME: Coordinate updateMessage reduction
-		updateMessageMerged := valueMap{}
+		updateMessageMerged := ValueMap{}
 		for v := range g {
 			m := 100000000.0 //FIXME: what is inf?
 			for i := uint32(0); i < uint32(nFrag); i++ {
@@ -306,12 +306,12 @@ func main() {
 
 		//FIXME: clear message
 		for i := uint32(0); i < uint32(nFrag); i++ {
-			updateMessage[i] = valueMap{}
+			updateMessage[i] = ValueMap{}
 		}
 
 		for i := uint32(0); i < uint32(nFrag); i++ {
 			// FIXME: should clear the visit in each IncEval? LibGrape did that
-			visitedPtrList[i] = visitedMap{}
+			visitedPtrList[i] = BoolMap{}
 			SsspIncEval(sg[i], startNodeIdx, i*vnumFrag+1, (i+1)*vnumFrag, updateMessageMerged, updateMessage[i], distPtrList[i], visitedPtrList[i])
 		}
 
@@ -333,7 +333,7 @@ func main() {
 	fmt.Println("[Info] Accomplished.")
 }
 
-func (g graph) Print() {
+func (g Graph) Print() {
 	for v := range g {
 		fmt.Printf("\nNode %v : ", v)
 		for u := range g.GetNode(v).adjacent {
@@ -343,7 +343,7 @@ func (g graph) Print() {
 }
 
 // DFS
-func DFS(g graph, startIdx uint32, visitCb func(uint32)) {
+func DFS(g Graph, startIdx uint32, visitCb func(uint32)) {
 	visited := map[uint32]bool{}
 	visited[startIdx] = true
 	for toVisitQueue := []uint32{startIdx}; len(toVisitQueue) > 0; {
@@ -365,7 +365,7 @@ func DFS(g graph, startIdx uint32, visitCb func(uint32)) {
 }
 
 // BFS
-func BFS(g graph, startIdx uint32, visitCb func(uint32)) {
+func BFS(g Graph, startIdx uint32, visitCb func(uint32)) {
 
 	visited := map[uint32]bool{}
 
@@ -403,7 +403,7 @@ func MinFloat64(v []float64) float64 {
 
 // SsspPEval
 //TODO: for the vertex partition scheme, only the worker with startNode should do PEval
-func SsspPEval(g graph, startIdx uint32, lRangeVIdx uint32, rRangeVIdx uint32, updateMessage valueMap, dist valueMap, visited visitedMap) {
+func SsspPEval(g Graph, startIdx uint32, lRangeVIdx uint32, rRangeVIdx uint32, updateMessage ValueMap, dist ValueMap, visited BoolMap) {
 
 	dist[startIdx] = 0.0
 
@@ -441,7 +441,7 @@ func SsspPEval(g graph, startIdx uint32, lRangeVIdx uint32, rRangeVIdx uint32, u
 	}
 }
 
-func SsspIncEval(g graph, startIdx uint32, lRangeVIdx uint32, rRangeVIdx uint32, updateMessageMerged valueMap, updateMessage valueMap, dist valueMap, visited visitedMap) {
+func SsspIncEval(g Graph, startIdx uint32, lRangeVIdx uint32, rRangeVIdx uint32, updateMessageMerged ValueMap, updateMessage ValueMap, dist ValueMap, visited BoolMap) {
 
 	toVisitQueue := make([]uint32, 0)
 
@@ -492,9 +492,9 @@ func SsspIncEval(g graph, startIdx uint32, lRangeVIdx uint32, rRangeVIdx uint32,
 }
 
 // Sssp
-func Sssp(g graph, startIdx uint32) (valueMap, visitedMap) {
-	visited := visitedMap{}
-	dist := valueMap{}
+func Sssp(g Graph, startIdx uint32) (ValueMap, BoolMap) {
+	visited := BoolMap{}
+	dist := ValueMap{}
 
 	dist[startIdx] = 0.0
 
@@ -524,7 +524,7 @@ func Sssp(g graph, startIdx uint32) (valueMap, visitedMap) {
 }
 
 // PageRank
-func PageRank(g graph, damping float64, eps float64) {
+func PageRank(g Graph, damping float64, eps float64) {
 	sumEdgeWeight := 0.0
 	// initialization (PR(node) = 1 / sum(edgeWeight))
 	for _, v := range g {
