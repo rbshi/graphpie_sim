@@ -290,87 +290,155 @@ func main() {
 	//g.Print()
 	fmt.Println("[Info] Graph construction done.")
 
-	resFileName := os.Args[3]
-	res := LoadResult(resFileName)
-	fmt.Println("[Info] Read in the results.")
+	//resFileName := os.Args[3]
+	//res := LoadResult(resFileName)
+	//fmt.Println("[Info] Read in the results.")
 
-	nFrag := 16
+	nFrag := 128
 	sg := SegmentedPartitioner(g, nFrag)
 	fmt.Println("[Info] Number of workers:", len(sg))
 
-	startNodeIdx := uint32(6)
-	// standard
-	dist, _ := Sssp(g, startNodeIdx)
+	// SSSP
+	//{
+	//	startNodeIdx := uint32(6)
+	//	// standard
+	//	dist, _ := Sssp(g, startNodeIdx)
+	//
+	//	for v, vv := range res {
+	//		if dist[v] != vv {
+	//			fmt.Println("Different @", v, res[v], vv)
+	//		}
+	//	}
+	//
+	//	// this is the global map for updating message
+	//	updateMessage := make([]ValueMap, nFrag)
+	//
+	//	// PtrList only holds and bypasses the ptr (these two lists are maintained individually by workers)
+	//	distPtrList := make([]ValueMap, nFrag)
+	//	visitedPtrList := make([]BoolMap, nFrag)
+	//
+	//	vnumFrag := uint32(math.Ceil(float64(len(g)) / float64(nFrag)))
+	//
+	//	for i := uint32(0); i < uint32(nFrag); i++ {
+	//		// FIXME: initialize
+	//		distPtrList[i] = ValueMap{}
+	//		visitedPtrList[i] = BoolMap{}
+	//		updateMessage[i] = ValueMap{}
+	//
+	//		nodeRange := NodeIDxRange{i*vnumFrag + 1, (i + 1) * vnumFrag}
+	//
+	//		SsspPEval(sg[i], startNodeIdx, nodeRange, updateMessage[i], distPtrList[i], visitedPtrList[i])
+	//	}
+	//
+	//	roundIdx := 1
+	//	flagNextRound := true
+	//	for flagNextRound {
+	//
+	//		flagNextRound = false
+	//
+	//		//Note: Coordinate updateMessage reduction
+	//		updateMessageMerged := ValueMap{}
+	//		for v := range g {
+	//			m := 100000000.0 //FIXME: what is inf?
+	//			for i := uint32(0); i < uint32(nFrag); i++ {
+	//				updateValue, updateExist := updateMessage[i][v]
+	//				if updateExist && updateValue < m {
+	//					m = updateValue
+	//					updateMessageMerged[v] = m
+	//				}
+	//			}
+	//		}
+	//
+	//		//NOTE: clear the merged message
+	//		for i := uint32(0); i < uint32(nFrag); i++ {
+	//			updateMessage[i] = ValueMap{}
+	//		}
+	//
+	//		for i := uint32(0); i < uint32(nFrag); i++ {
+	//			// NOTE: should clear the visit in each IncEval? LibGrape did that
+	//			visitedPtrList[i] = BoolMap{}
+	//			nodeRange := NodeIDxRange{i*vnumFrag + 1, (i + 1) * vnumFrag}
+	//			SsspIncEval(sg[i], nodeRange, updateMessageMerged, updateMessage[i], distPtrList[i], visitedPtrList[i])
+	//		}
+	//
+	//		for i := uint32(0); i < uint32(nFrag); i++ {
+	//			flagNextRound = flagNextRound || len(updateMessage[i]) > 0
+	//		}
+	//
+	//		fmt.Println("[Info] Round:", roundIdx)
+	//		roundIdx++
+	//	}
+	//
+	//	for i := uint32(0); i < uint32(nFrag); i++ {
+	//		for v, vv := range distPtrList[i] {
+	//			if dist[v] != vv {
+	//				fmt.Println("Different @", v, dist[v], vv)
+	//			}
+	//		}
+	//	}
+	//}
 
-	for v, vv := range res {
-		if dist[v] != vv {
-			fmt.Println("Different @", v, res[v], vv)
+	{
+		// this is the global map for updating message
+		updateMessage := make([]ValueMap, nFrag)
+		// PtrList only holds and bypasses the ptr (these two lists are maintained individually by workers)
+		prPtrList := make([]ValueMap, nFrag)
+		vnumFrag := uint32(math.Ceil(float64(len(g)) / float64(nFrag)))
+		damping := 0.85
+
+		for i := uint32(0); i < uint32(nFrag); i++ {
+			// FIXME: initialize
+			prPtrList[i] = ValueMap{}
+			updateMessage[i] = ValueMap{}
+			nodeRange := NodeIDxRange{i*vnumFrag + 1, (i + 1) * vnumFrag}
+			PageRankPEval(sg[i], damping, len(g), nodeRange, updateMessage[i], prPtrList[i])
 		}
-	}
 
-	// this is the global map for updating message
-	updateMessage := make([]ValueMap, nFrag)
+		roundIdx := 1
+		for true {
 
-	// PtrList only holds and bypasses the ptr (these two lists are maintained individually by workers)
-	distPtrList := make([]ValueMap, nFrag)
-	visitedPtrList := make([]BoolMap, nFrag)
-
-	vnumFrag := uint32(math.Ceil(float64(len(g)) / float64(nFrag)))
-
-	for i := uint32(0); i < uint32(nFrag); i++ {
-		// FIXME: initialize
-		distPtrList[i] = ValueMap{}
-		visitedPtrList[i] = BoolMap{}
-		updateMessage[i] = ValueMap{}
-
-		nodeRange := NodeIDxRange{i*vnumFrag + 1, (i + 1) * vnumFrag}
-
-		SsspPEval(sg[i], startNodeIdx, nodeRange, updateMessage[i], distPtrList[i], visitedPtrList[i])
-	}
-
-	roundIdx := 1
-	flagNextRound := true
-	for flagNextRound {
-
-		flagNextRound = false
-
-		//Note: Coordinate updateMessage reduction
-		updateMessageMerged := ValueMap{}
-		for v := range g {
-			m := 100000000.0 //FIXME: what is inf?
-			for i := uint32(0); i < uint32(nFrag); i++ {
-				updateValue, updateExist := updateMessage[i][v]
-				if updateExist && updateValue < m {
-					m = updateValue
-					updateMessageMerged[v] = m
+			//Note: Coordinate updateMessage reduction
+			updateMessageMerged := ValueMap{}
+			for v := range g {
+				for i := uint32(0); i < uint32(nFrag); i++ {
+					updateValue, updateExist := updateMessage[i][v]
+					if updateExist {
+						MapAccum(updateMessageMerged, v, updateValue)
+					}
 				}
 			}
-		}
+			//NOTE: clear the merged message
+			for i := uint32(0); i < uint32(nFrag); i++ {
+				updateMessage[i] = ValueMap{}
+			}
 
-		//NOTE: clear the merged message
-		for i := uint32(0); i < uint32(nFrag); i++ {
-			updateMessage[i] = ValueMap{}
-		}
+			//TODO: Assemble (HW)
+			for i := uint32(0); i < uint32(nFrag); i++ {
+				nodeRange := NodeIDxRange{i*vnumFrag + 1, (i + 1) * vnumFrag}
+				for updateNodeIdx, updateValue := range updateMessageMerged {
+					if NodeInRange(updateNodeIdx, nodeRange) {
+						prPtrList[i][updateNodeIdx] += updateValue
+					}
+				}
+			}
 
-		for i := uint32(0); i < uint32(nFrag); i++ {
-			// NOTE: should clear the visit in each IncEval? LibGrape did that
-			visitedPtrList[i] = BoolMap{}
-			nodeRange := NodeIDxRange{i*vnumFrag + 1, (i + 1) * vnumFrag}
-			SsspIncEval(sg[i], nodeRange, updateMessageMerged, updateMessage[i], distPtrList[i], visitedPtrList[i])
-		}
+			// error calculation
+			errSumAllFrag := 0.0
+			for v := range g {
+				prValue := prPtrList[int(math.Floor(float64(v-1)/float64(vnumFrag)))][v]
+				errSumAllFrag += math.Abs(g[v].nodeValue - prValue)
+				g[v].nodeValue = prValue
+			}
+			fmt.Println("[Info] Round:", roundIdx, "AvgError:", errSumAllFrag/float64(len(g)))
+			roundIdx++
 
-		for i := uint32(0); i < uint32(nFrag); i++ {
-			flagNextRound = flagNextRound || len(updateMessage[i]) > 0
-		}
+			if errSumAllFrag/float64(len(g)) < 0.000000001 {
+				break
+			}
 
-		fmt.Println("[Info] Round:", roundIdx)
-		roundIdx++
-	}
-
-	for i := uint32(0); i < uint32(nFrag); i++ {
-		for v, vv := range distPtrList[i] {
-			if dist[v] != vv {
-				fmt.Println("Different @", v, dist[v], vv)
+			for i := uint32(0); i < uint32(nFrag); i++ {
+				nodeRange := NodeIDxRange{i*vnumFrag + 1, (i + 1) * vnumFrag}
+				PageRankKernel(sg[i], damping, len(g), nodeRange, updateMessage[i], prPtrList[i])
 			}
 		}
 	}
@@ -544,17 +612,18 @@ func Sssp(g Graph, startIdx uint32) (ValueMap, BoolMap) {
 	return dist, visited
 }
 
+func MapAccum(valueMap ValueMap, dst uint32, accumValue float64) {
+	oriValue, exist := valueMap[dst]
+	if exist {
+		valueMap[dst] = oriValue + accumValue
+	} else {
+		valueMap[dst] = accumValue
+	}
+}
+
 // PageRank
 func PageRank(g Graph, damping float64, eps float64) {
-	sumEdgeWeight := 0.0
-	// initialization (PR(node) = 1 / sum(edgeWeight))
-	for _, v := range g {
-		for _, e := range v.weight {
-			sumEdgeWeight += e
-		}
-	}
 
-	//TODO: make the PR trans in weighted version
 	initPR := 1 / float64(len(g))
 	for _, v := range g {
 		v.nodeValue = initPR
@@ -565,12 +634,12 @@ func PageRank(g Graph, damping float64, eps float64) {
 		errSum := 0.0
 
 		// calculate the outgoing value of each node
-		sendNodeValue := make(ValueMap)
+		sendPR := make(ValueMap)
 		for i, v := range g {
 			if len(v.adjacent) > 0 {
-				sendNodeValue[i] = v.nodeValue / float64(len(v.adjacent)) * damping
+				sendPR[i] = v.nodeValue / float64(len(v.adjacent)) * damping
 			} else {
-				sendNodeValue[i] = 0.0
+				sendPR[i] = 0.0
 			}
 
 		}
@@ -578,7 +647,7 @@ func PageRank(g Graph, damping float64, eps float64) {
 		for _, v := range g {
 			update := 0.0
 			for j := range v.adjacent {
-				update += sendNodeValue[j]
+				update += sendPR[j]
 			}
 			newNodeValue := fixedDump + update
 			errSum += math.Abs(newNodeValue - v.nodeValue)
@@ -588,5 +657,44 @@ func PageRank(g Graph, damping float64, eps float64) {
 		// calculate the average error
 		errAvgSum = errSum / float64(len(g))
 		fmt.Println("[Info] PageRank epsilon is converged to: ", errAvgSum)
+	}
+}
+
+func PageRankPEval(g Graph, damping float64, totalnNode int, nodeRange NodeIDxRange, updateMessage ValueMap, pr ValueMap) {
+
+	// average initialize PR
+	initPR := 1 / float64(totalnNode)
+	for v := range g {
+		pr[v] = initPR
+		g[v].nodeValue = initPR //FIXME: use nodeValue to keep the old pr for err calculation, NOT used for PR
+	}
+
+	PageRankKernel(g, damping, totalnNode, nodeRange, updateMessage, pr)
+
+}
+
+func PageRankKernel(g Graph, damping float64, totalnNode int, nodeRange NodeIDxRange, updateMessage ValueMap, pr ValueMap) {
+
+	fixedDump := (1.0 - damping) / float64(totalnNode)
+
+	// newPR is for local node
+	newPR := ValueMap{}
+	for i, v := range g {
+		if len(v.adjacent) > 0 {
+			// calculate the sendPR
+			sendPR := pr[i] / float64(len(v.adjacent)) * damping
+			// accumulate to newpr tables
+			for j := range v.adjacent {
+				// if local
+				if NodeInRange(j, nodeRange) {
+					MapAccum(newPR, j, sendPR)
+				} else {
+					MapAccum(updateMessage, j, sendPR)
+				}
+			}
+		}
+	}
+	for v := range g {
+		pr[v] = newPR[v] + fixedDump
 	}
 }
