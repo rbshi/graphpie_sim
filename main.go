@@ -26,6 +26,12 @@ type Node struct {
 type BoolMap map[uint32]bool
 type ValueMap map[uint32]float64
 
+// NodeIdx Range
+type NodeIDxRange struct {
+	lIdx uint32
+	rIdx uint32
+}
+
 // Graph partition: SegmentedPartitioner
 func SegmentedPartitioner(g Graph, nFrag int) (sg SubGraph) {
 	// initialization
@@ -283,7 +289,10 @@ func main() {
 		distPtrList[i] = ValueMap{}
 		visitedPtrList[i] = BoolMap{}
 		updateMessage[i] = ValueMap{}
-		SsspPEval(sg[i], startNodeIdx, i*vnumFrag+1, (i+1)*vnumFrag, updateMessage[i], distPtrList[i], visitedPtrList[i])
+
+		nodeRange := NodeIDxRange{i*vnumFrag + 1, (i + 1) * vnumFrag}
+
+		SsspPEval(sg[i], startNodeIdx, nodeRange, updateMessage[i], distPtrList[i], visitedPtrList[i])
 	}
 
 	flagNextRound := true
@@ -312,7 +321,8 @@ func main() {
 		for i := uint32(0); i < uint32(nFrag); i++ {
 			// FIXME: should clear the visit in each IncEval? LibGrape did that
 			visitedPtrList[i] = BoolMap{}
-			SsspIncEval(sg[i], startNodeIdx, i*vnumFrag+1, (i+1)*vnumFrag, updateMessageMerged, updateMessage[i], distPtrList[i], visitedPtrList[i])
+			nodeRange := NodeIDxRange{i*vnumFrag + 1, (i + 1) * vnumFrag}
+			SsspIncEval(sg[i], nodeRange, updateMessageMerged, updateMessage[i], distPtrList[i], visitedPtrList[i])
 		}
 
 		for i := uint32(0); i < uint32(nFrag); i++ {
@@ -387,8 +397,8 @@ func BFS(g Graph, startIdx uint32, visitCb func(uint32)) {
 	}
 }
 
-func NodeInRange(nodeIdx uint32, lRangeVIdx uint32, rRangeVIdx uint32) bool {
-	return nodeIdx >= lRangeVIdx && nodeIdx <= rRangeVIdx
+func NodeInRange(nodeIdx uint32, nodeRange NodeIDxRange) bool {
+	return nodeIdx >= nodeRange.lIdx && nodeIdx <= nodeRange.rIdx
 }
 
 func MinFloat64(v []float64) float64 {
@@ -402,63 +412,40 @@ func MinFloat64(v []float64) float64 {
 }
 
 // SsspPEval
-//TODO: for the vertex partition scheme, only the worker with startNode should do PEval
-func SsspPEval(g Graph, startIdx uint32, lRangeVIdx uint32, rRangeVIdx uint32, updateMessage ValueMap, dist ValueMap, visited BoolMap) {
+//Note: for the edge-cut scheme, only the worker with startNode should do PEval
+func SsspPEval(g Graph, startIdx uint32, nodeRange NodeIDxRange, updateMessage ValueMap, dist ValueMap, visited BoolMap) {
 
-	dist[startIdx] = 0.0
+	toVisitQueue := make([]uint32, 0)
 
-	if NodeInRange(startIdx, lRangeVIdx, rRangeVIdx) {
-		for toVisitQueue := []uint32{startIdx}; len(toVisitQueue) > 0; {
-			currentNodeIdx := toVisitQueue[0]
-			currentNode := g.GetNode(currentNodeIdx)
-			toVisitQueue = toVisitQueue[1:]
-
-			//if visited[currentNodeIdx] {
-			//	continue
-			//}
-
-			visited[currentNodeIdx] = true
-
-			for v := range currentNode.adjacent {
-				ndist := dist[currentNodeIdx] + currentNode.weight[v]
-				// the update will be consumed locally (preferable)
-				if NodeInRange(v, lRangeVIdx, rRangeVIdx) {
-					_, exist := dist[v]
-					if !exist || dist[v] > ndist {
-						dist[v] = ndist
-						//FIXME: here still will be multi insert of the same node? but will be only visited ONCE as the src
-						toVisitQueue = append(toVisitQueue, v)
-					}
-				} else {
-					//FIXME: sendout <updated v, ndist>, but compare the update to the same v in the message list (is that possible on HW?)
-					updateValue, updateExist := updateMessage[v]
-					if !updateExist || updateValue > ndist {
-						updateMessage[v] = ndist
-					}
-				}
-			}
-		}
+	if NodeInRange(startIdx, nodeRange) {
+		dist[startIdx] = 0.0
+		toVisitQueue = append(toVisitQueue, startIdx)
 	}
+
+	SsspKernel(g, nodeRange, updateMessage, dist, toVisitQueue)
 }
 
-func SsspIncEval(g Graph, startIdx uint32, lRangeVIdx uint32, rRangeVIdx uint32, updateMessageMerged ValueMap, updateMessage ValueMap, dist ValueMap, visited BoolMap) {
+func SsspIncEval(g Graph, nodeRange NodeIDxRange, updateMessageMerged ValueMap, updateMessage ValueMap, dist ValueMap, visited BoolMap) {
 
 	toVisitQueue := make([]uint32, 0)
 
 	//TODO: receive the merged update and write the updated value to dist (DO NOT forget to compare with the local)
-	for i := lRangeVIdx; i <= rRangeVIdx; i++ {
-		updateValue, updateExist := updateMessageMerged[i]
-		distValue, distExist := dist[i]
-		//FIXME
-		if distExist && updateExist && updateValue < distValue {
-			dist[i] = updateValue
-			toVisitQueue = append(toVisitQueue, i)
-		} else if !distExist && updateExist {
-			dist[i] = updateValue
-			toVisitQueue = append(toVisitQueue, i)
+	for updateNodeIdx, updateValue := range updateMessageMerged {
+		if NodeInRange(updateNodeIdx, nodeRange) {
+			distValue, distExist := dist[updateNodeIdx]
+			if (distExist && updateValue < distValue) || !distExist {
+				dist[updateNodeIdx] = updateValue
+				toVisitQueue = append(toVisitQueue, updateNodeIdx)
+			}
 		}
 	}
 
+	SsspKernel(g, nodeRange, updateMessage, dist, toVisitQueue)
+
+}
+
+// the overlapped behavior of PEval ^ IncEval: for hardware reuse
+func SsspKernel(g Graph, nodeRange NodeIDxRange, updateMessage ValueMap, dist ValueMap, toVisitQueue []uint32) {
 	for len(toVisitQueue) > 0 {
 		currentNodeIdx := toVisitQueue[0]
 		currentNode := g.GetNode(currentNodeIdx)
@@ -467,13 +454,12 @@ func SsspIncEval(g Graph, startIdx uint32, lRangeVIdx uint32, rRangeVIdx uint32,
 		//if visited[currentNodeIdx] {
 		//	continue
 		//}
-
-		visited[currentNodeIdx] = true
+		//visited[currentNodeIdx] = true
 
 		for v := range currentNode.adjacent {
 			ndist := dist[currentNodeIdx] + currentNode.weight[v]
 			// the update will be consumed locally (preferable)
-			if NodeInRange(v, lRangeVIdx, rRangeVIdx) {
+			if NodeInRange(v, nodeRange) {
 				_, exist := dist[v]
 				if !exist || dist[v] > ndist {
 					dist[v] = ndist
@@ -506,8 +492,7 @@ func Sssp(g Graph, startIdx uint32) (ValueMap, BoolMap) {
 		//if visited[currentNodeIdx] {
 		//	continue
 		//}
-
-		visited[currentNodeIdx] = true
+		//visited[currentNodeIdx] = true
 
 		for v := range currentNode.adjacent {
 			//FIXME: only for v without being visited!
@@ -556,7 +541,7 @@ func PageRank(g Graph, damping float64, eps float64) {
 
 		for _, v := range g {
 			update := 0.0
-			for j, _ := range v.adjacent {
+			for j := range v.adjacent {
 				update += sendNodeValue[j]
 			}
 			newNodeValue := fixedDump + update
