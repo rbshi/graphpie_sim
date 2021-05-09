@@ -2,12 +2,54 @@ package main
 
 import (
 	"bufio"
+	"container/heap"
 	"fmt"
 	"log"
 	"math"
 	"os"
 	"strings"
 )
+
+// Priority queue with heap
+type ValueIdxTuple struct {
+	value   float64
+	nodeIdx uint32
+	index   int
+}
+
+type PriorityQueue []*ValueIdxTuple
+
+func (pq PriorityQueue) Len() int { return len(pq) }
+
+func (pq PriorityQueue) Less(i, j int) bool {
+	// We want Pop to give us the highest, not lowest, priority so we use greater than here.
+	return pq[i].value < pq[j].value
+}
+func (pq PriorityQueue) Swap(i, j int) {
+	pq[i], pq[j] = pq[j], pq[i]
+	pq[i].index = i
+	pq[j].index = j
+}
+func (pq *PriorityQueue) Push(x interface{}) {
+	n := pq.Len()
+	item := x.(*ValueIdxTuple)
+	item.index = n
+	*pq = append(*pq, item)
+}
+func (pq *PriorityQueue) Pop() interface{} {
+	old := *pq
+	n := len(old)
+	item := old[n-1]
+	old[n-1] = nil  // avoid memory leak
+	item.index = -1 // for safety
+	*pq = old[0 : n-1]
+	return item
+}
+func (pq *PriorityQueue) update(item *ValueIdxTuple, value float64, nodeIdx uint32) {
+	item.value = value
+	item.nodeIdx = nodeIdx
+	heap.Fix(pq, item.index)
+}
 
 // a Graph is with key (nodeIdx) and node
 type Graph map[uint32]*Node
@@ -19,7 +61,7 @@ type SubGraph []Graph
 type Node struct {
 	nodeValue float64
 	adjacent  map[uint32]*Node
-	weight    map[uint32]float64
+	weight    ValueMap
 }
 
 // visited map
@@ -53,7 +95,7 @@ func (g Graph) AddNode(k uint32, v float64) {
 		err := fmt.Errorf("[Error] Node %v is already exist @%v.", k, ptrNode)
 		fmt.Println(err.Error())
 	} else {
-		g[k] = &Node{nodeValue: v, adjacent: make(map[uint32]*Node), weight: make(map[uint32]float64)}
+		g[k] = &Node{nodeValue: v, adjacent: make(map[uint32]*Node), weight: make(ValueMap)}
 	}
 }
 
@@ -252,17 +294,9 @@ func main() {
 	res := LoadResult(resFileName)
 	fmt.Println("[Info] Read in the results.")
 
-	nFrag := 10
+	nFrag := 16
 	sg := SegmentedPartitioner(g, nFrag)
 	fmt.Println("[Info] Number of workers:", len(sg))
-
-	//// empty list
-	//var visitedOrder []uint32
-	//
-	//// define the Callback function in traversal, here append the search order
-	//visitCb := func(i uint32) {
-	//	visitedOrder = append(visitedOrder, i)
-	//}
 
 	startNodeIdx := uint32(6)
 	// standard
@@ -275,12 +309,11 @@ func main() {
 	}
 
 	// this is the global map for updating message
-	// FIXME: []float64 is the the message (ndist) in SSSP
-	updateMessage := make([]map[uint32]float64, nFrag)
+	updateMessage := make([]ValueMap, nFrag)
 
-	// PtrList only holds and bypasses the ptr (these two lists are mantained individually by workers)
-	distPtrList := make([]map[uint32]float64, nFrag)
-	visitedPtrList := make([]map[uint32]bool, nFrag)
+	// PtrList only holds and bypasses the ptr (these two lists are maintained individually by workers)
+	distPtrList := make([]ValueMap, nFrag)
+	visitedPtrList := make([]BoolMap, nFrag)
 
 	vnumFrag := uint32(math.Ceil(float64(len(g)) / float64(nFrag)))
 
@@ -295,12 +328,13 @@ func main() {
 		SsspPEval(sg[i], startNodeIdx, nodeRange, updateMessage[i], distPtrList[i], visitedPtrList[i])
 	}
 
+	roundIdx := 1
 	flagNextRound := true
 	for flagNextRound {
 
 		flagNextRound = false
 
-		//FIXME: Coordinate updateMessage reduction
+		//Note: Coordinate updateMessage reduction
 		updateMessageMerged := ValueMap{}
 		for v := range g {
 			m := 100000000.0 //FIXME: what is inf?
@@ -313,13 +347,13 @@ func main() {
 			}
 		}
 
-		//FIXME: clear message
+		//NOTE: clear the merged message
 		for i := uint32(0); i < uint32(nFrag); i++ {
 			updateMessage[i] = ValueMap{}
 		}
 
 		for i := uint32(0); i < uint32(nFrag); i++ {
-			// FIXME: should clear the visit in each IncEval? LibGrape did that
+			// NOTE: should clear the visit in each IncEval? LibGrape did that
 			visitedPtrList[i] = BoolMap{}
 			nodeRange := NodeIDxRange{i*vnumFrag + 1, (i + 1) * vnumFrag}
 			SsspIncEval(sg[i], nodeRange, updateMessageMerged, updateMessage[i], distPtrList[i], visitedPtrList[i])
@@ -329,7 +363,8 @@ func main() {
 			flagNextRound = flagNextRound || len(updateMessage[i]) > 0
 		}
 
-		fmt.Println("[Info] One round.")
+		fmt.Println("[Info] Round:", roundIdx)
+		roundIdx++
 	}
 
 	for i := uint32(0); i < uint32(nFrag); i++ {
@@ -354,7 +389,7 @@ func (g Graph) Print() {
 
 // DFS
 func DFS(g Graph, startIdx uint32, visitCb func(uint32)) {
-	visited := map[uint32]bool{}
+	visited := BoolMap{}
 	visited[startIdx] = true
 	for toVisitQueue := []uint32{startIdx}; len(toVisitQueue) > 0; {
 		currentNodeIdx := toVisitQueue[0]
@@ -377,7 +412,7 @@ func DFS(g Graph, startIdx uint32, visitCb func(uint32)) {
 // BFS
 func BFS(g Graph, startIdx uint32, visitCb func(uint32)) {
 
-	visited := map[uint32]bool{}
+	visited := BoolMap{}
 
 	for toVisitQueue := []uint32{startIdx}; len(toVisitQueue) > 0; {
 		// get the currentNodeIdx in Queue
@@ -415,19 +450,19 @@ func MinFloat64(v []float64) float64 {
 //Note: for the edge-cut scheme, only the worker with startNode should do PEval
 func SsspPEval(g Graph, startIdx uint32, nodeRange NodeIDxRange, updateMessage ValueMap, dist ValueMap, visited BoolMap) {
 
-	toVisitQueue := make([]uint32, 0)
-
 	if NodeInRange(startIdx, nodeRange) {
 		dist[startIdx] = 0.0
-		toVisitQueue = append(toVisitQueue, startIdx)
+		toVisitQueue := make(PriorityQueue, 0)
+		heap.Init(&toVisitQueue)
+		heap.Push(&toVisitQueue, &ValueIdxTuple{value: 0.0, nodeIdx: startIdx})
+		SsspKernel(g, nodeRange, updateMessage, dist, visited, toVisitQueue)
 	}
-
-	SsspKernel(g, nodeRange, updateMessage, dist, toVisitQueue)
 }
 
 func SsspIncEval(g Graph, nodeRange NodeIDxRange, updateMessageMerged ValueMap, updateMessage ValueMap, dist ValueMap, visited BoolMap) {
 
-	toVisitQueue := make([]uint32, 0)
+	toVisitQueue := make(PriorityQueue, 0)
+	heap.Init(&toVisitQueue)
 
 	//TODO: receive the merged update and write the updated value to dist (DO NOT forget to compare with the local)
 	for updateNodeIdx, updateValue := range updateMessageMerged {
@@ -435,36 +470,35 @@ func SsspIncEval(g Graph, nodeRange NodeIDxRange, updateMessageMerged ValueMap, 
 			distValue, distExist := dist[updateNodeIdx]
 			if (distExist && updateValue < distValue) || !distExist {
 				dist[updateNodeIdx] = updateValue
-				toVisitQueue = append(toVisitQueue, updateNodeIdx)
+				heap.Push(&toVisitQueue, &ValueIdxTuple{value: updateValue, nodeIdx: updateNodeIdx})
 			}
 		}
 	}
 
-	SsspKernel(g, nodeRange, updateMessage, dist, toVisitQueue)
+	SsspKernel(g, nodeRange, updateMessage, dist, visited, toVisitQueue)
 
 }
 
 // the overlapped behavior of PEval ^ IncEval: for hardware reuse
-func SsspKernel(g Graph, nodeRange NodeIDxRange, updateMessage ValueMap, dist ValueMap, toVisitQueue []uint32) {
+func SsspKernel(g Graph, nodeRange NodeIDxRange, updateMessage ValueMap, dist ValueMap, visited BoolMap, toVisitQueue PriorityQueue) {
 	for len(toVisitQueue) > 0 {
-		currentNodeIdx := toVisitQueue[0]
-		currentNode := g.GetNode(currentNodeIdx)
-		toVisitQueue = toVisitQueue[1:]
+		currentNodeTuple := heap.Pop(&toVisitQueue).(*ValueIdxTuple)
+		currentNode := g.GetNode(currentNodeTuple.nodeIdx)
 
-		//if visited[currentNodeIdx] {
-		//	continue
-		//}
-		//visited[currentNodeIdx] = true
+		// Dijkstra
+		if visited[currentNodeTuple.nodeIdx] {
+			continue
+		}
+		visited[currentNodeTuple.nodeIdx] = true
 
 		for v := range currentNode.adjacent {
-			ndist := dist[currentNodeIdx] + currentNode.weight[v]
+			ndist := dist[currentNodeTuple.nodeIdx] + currentNode.weight[v]
 			// the update will be consumed locally (preferable)
 			if NodeInRange(v, nodeRange) {
 				_, exist := dist[v]
 				if !exist || dist[v] > ndist {
 					dist[v] = ndist
-					//FIXME: here still will be multi insert of the same node? but will be only visited ONCE as the src
-					toVisitQueue = append(toVisitQueue, v)
+					heap.Push(&toVisitQueue, &ValueIdxTuple{value: ndist, nodeIdx: v})
 				}
 			} else {
 				//FIXME: sendout <updated v, ndist>, but compare the update to the same v in the message list (is that possible on HW?)
@@ -484,24 +518,26 @@ func Sssp(g Graph, startIdx uint32) (ValueMap, BoolMap) {
 
 	dist[startIdx] = 0.0
 
-	for toVisitQueue := []uint32{startIdx}; len(toVisitQueue) > 0; {
-		currentNodeIdx := toVisitQueue[0]
-		currentNode := g.GetNode(currentNodeIdx)
-		toVisitQueue = toVisitQueue[1:]
+	toVisitQueue := make(PriorityQueue, 0)
+	heap.Init(&toVisitQueue)
+	heap.Push(&toVisitQueue, &ValueIdxTuple{value: 0.0, nodeIdx: startIdx})
 
-		//if visited[currentNodeIdx] {
-		//	continue
-		//}
-		//visited[currentNodeIdx] = true
+	for len(toVisitQueue) > 0 {
+		currentNodeTuple := heap.Pop(&toVisitQueue).(*ValueIdxTuple)
+		currentNode := g.GetNode(currentNodeTuple.nodeIdx)
+
+		// Dijkstra
+		if visited[currentNodeTuple.nodeIdx] {
+			continue
+		}
+		visited[currentNodeTuple.nodeIdx] = true
 
 		for v := range currentNode.adjacent {
-			//FIXME: only for v without being visited!
-			ndist := dist[currentNodeIdx] + currentNode.weight[v]
+			ndist := dist[currentNodeTuple.nodeIdx] + currentNode.weight[v]
 			_, exist := dist[v]
 			if !exist || dist[v] > ndist {
 				dist[v] = ndist
-				//FIXME: here still will be multi insert of the same node? but will be only visited ONCE as the src
-				toVisitQueue = append(toVisitQueue, v)
+				heap.Push(&toVisitQueue, &ValueIdxTuple{value: ndist, nodeIdx: v})
 			}
 		}
 	}
@@ -529,7 +565,7 @@ func PageRank(g Graph, damping float64, eps float64) {
 		errSum := 0.0
 
 		// calculate the outgoing value of each node
-		sendNodeValue := make(map[uint32]float64)
+		sendNodeValue := make(ValueMap)
 		for i, v := range g {
 			if len(v.adjacent) > 0 {
 				sendNodeValue[i] = v.nodeValue / float64(len(v.adjacent)) * damping
